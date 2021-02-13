@@ -10,6 +10,7 @@ SHARED_HEADS = Registry('shared_head')
 HEADS = Registry('head')
 LOSSES = Registry('loss')
 DETECTORS = Registry('detector')
+RAND_BOX = Registry('rand_box')
 
 
 def build(cfg, registry, default_args=None):
@@ -62,6 +63,11 @@ def build_head(cfg):
 def build_loss(cfg):
     """Build loss."""
     return build(cfg, LOSSES)
+
+
+def build_rand_box(cfg):
+    """Build rand box."""
+    return build(cfg, RAND_BOX)
 
 
 def build_detector(cfg, train_cfg=None, test_cfg=None):
