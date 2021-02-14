@@ -11,6 +11,7 @@ HEADS = Registry('head')
 LOSSES = Registry('loss')
 DETECTORS = Registry('detector')
 RAND_BOX = Registry('rand_box')
+CONTRASTIVE_HEAD = Registry('contrastive_head')
 
 
 def build(cfg, registry, default_args=None):
@@ -68,6 +69,11 @@ def build_loss(cfg):
 def build_rand_box(cfg):
     """Build rand box."""
     return build(cfg, RAND_BOX)
+
+
+def build_contrastive_head(cfg):
+    """Build contrastive head which include projection and prediction head."""
+    return build(cfg, CONTRASTIVE_HEAD)
 
 
 def build_detector(cfg, train_cfg=None, test_cfg=None):
