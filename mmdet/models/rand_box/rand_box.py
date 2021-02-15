@@ -27,7 +27,7 @@ class RandBox(nn.Module):
         self.min_num_of_final_box = min_num_of_final_box
         self.max_num_of_final_box = max_num_of_final_box
 
-    def forward(self, gt_bboxes, im_metas):
+    def forward(self, num_img, device, im_metas):
         """Forward features from the upstream network.
 
         Args:
@@ -45,9 +45,6 @@ class RandBox(nn.Module):
                     scale levels, each is a 4D-tensor, the channels number \
                     is num_anchors * 4.
         """
-
-        device = gt_bboxes[0].device
-        num_img = len(gt_bboxes)
 
         rand_boxes_init = \
             torch.rand(num_img, self.num_of_init_boxes, 4).to(device)

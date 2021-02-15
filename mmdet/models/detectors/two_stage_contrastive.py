@@ -116,10 +116,6 @@ class TwoStageDetectorForContrastive(BaseDetector):
                       img,
                       img_metas,
                       gt_bboxes,
-                      gt_labels,
-                      gt_bboxes_ignore=None,
-                      gt_masks=None,
-                      proposals=None,
                       **kwargs):
         """
         Args:
@@ -149,13 +145,15 @@ class TwoStageDetectorForContrastive(BaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+        device = img.device
+        num_img = img.size(0)
 
         # prepare different views
         with torch.no_grad():
             img_1 = img[:, :3, :, :].clone()
             img_2 = img[:, 3:, :, :].clone()
 
-        pseude_gt_bboxes = self.gen_rand_box(gt_bboxes, img_metas)
+        pseude_gt_bboxes = self.gen_rand_box(num_img, device, img_metas)
 
         x_1 = self.extract_feat(img_1)
         x_2 = self.extract_feat(img_2)
@@ -193,43 +191,13 @@ class TwoStageDetectorForContrastive(BaseDetector):
                                 img_meta,
                                 proposals=None,
                                 rescale=False):
-        """Async test without augmentation."""
-        assert self.with_bbox, 'Bbox head must be implemented.'
-        x = self.extract_feat(img)
-
-        if proposals is None:
-            proposal_list = await self.rpn_head.async_simple_test_rpn(
-                x, img_meta)
-        else:
-            proposal_list = proposals
-
-        return await self.roi_head.async_simple_test(
-            x, proposal_list, img_meta, rescale=rescale)
+        pass
 
     def simple_test(self, img, img_metas, proposals=None, rescale=False):
-        """Test without augmentation."""
-        assert self.with_bbox, 'Bbox head must be implemented.'
-
-        x = self.extract_feat(img)
-
-        if proposals is None:
-            proposal_list = self.rpn_head.simple_test_rpn(x, img_metas)
-        else:
-            proposal_list = proposals
-
-        return self.roi_head.simple_test(
-            x, proposal_list, img_metas, rescale=rescale)
+        pass
 
     def aug_test(self, imgs, img_metas, rescale=False):
-        """Test with augmentations.
-
-        If rescale is False, then returned bboxes and masks will fit the scale
-        of imgs[0].
-        """
-        x = self.extract_feats(imgs)
-        proposal_list = self.rpn_head.aug_test_rpn(x, img_metas)
-        return self.roi_head.aug_test(
-            x, proposal_list, img_metas, rescale=rescale)
+        pass
 
     def identify(self, loss, id):
         assert isinstance(loss, dict), "loss is not dict()."
