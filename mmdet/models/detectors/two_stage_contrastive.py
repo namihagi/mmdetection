@@ -115,7 +115,6 @@ class TwoStageDetectorForContrastive(BaseDetector):
     def forward_train(self,
                       img,
                       img_metas,
-                      gt_bboxes,
                       **kwargs):
         """
         Args:
@@ -145,46 +144,41 @@ class TwoStageDetectorForContrastive(BaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        device = img.device
-        num_img = img.size(0)
 
-        # prepare different views
-        with torch.no_grad():
-            img_1 = img[:, :3, :, :].clone()
-            img_2 = img[:, 3:, :, :].clone()
-
-        pseude_gt_bboxes = self.gen_rand_box(num_img, device, img_metas)
-
-        x_1 = self.extract_feat(img_1)
-        x_2 = self.extract_feat(img_2)
+        pseudo_gt_bboxes_1, pseudo_gt_bboxes_2, \
+            img_1, img_2 = self.gen_rand_box(img, img_metas)
 
         losses = dict()
 
-        # RPN forward and loss
-        if self.with_rpn:
-            rpn_losses_1 = self.rpn_head.forward_train(
-                x_1,
-                img_metas,
-                pseude_gt_bboxes)
-            rpn_losses_1 = self.identify(rpn_losses_1, 1)
-            losses.update(rpn_losses_1)
-            rpn_losses_2 = self.rpn_head.forward_train(
-                x_2,
-                img_metas,
-                pseude_gt_bboxes)
-            rpn_losses_2 = self.identify(rpn_losses_2, 2)
-            losses.update(rpn_losses_2)
-
-        proposal_list = pseude_gt_bboxes
-
-        roi_feats_1 = self.roi_head.forward_train(x_1, proposal_list)
-        roi_feats_2 = self.roi_head.forward_train(x_2, proposal_list)
+        roi_feats_1 = self.forward_each_img(
+            img_1, img_metas, 1, pseudo_gt_bboxes_1, losses)
+        roi_feats_2 = self.forward_each_img(
+            img_2, img_metas, 2, pseudo_gt_bboxes_2, losses)
 
         # forward projection, prediction and loss
         constrastive_losses = self.contrastive_head(roi_feats_1,
                                                     roi_feats_2)
         losses.update(constrastive_losses)
         return losses
+
+    def forward_each_img(self, img, img_metas, img_id,
+                         pseudo_gt_bboxes, losses):
+        assert isinstance(img_id, int)
+
+        x = self.extract_feat(img)
+
+        # RPN forward and loss
+        if self.with_rpn:
+            rpn_losses = self.rpn_head.forward_train(
+                x,
+                img_metas,
+                pseudo_gt_bboxes)
+            rpn_losses = self.identify(rpn_losses, img_id)
+            losses.update(rpn_losses)
+
+        roi_feats = self.roi_head.forward_train(x, pseudo_gt_bboxes)
+
+        return roi_feats
 
     async def async_simple_test(self,
                                 img,

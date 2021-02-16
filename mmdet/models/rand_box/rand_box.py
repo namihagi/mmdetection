@@ -14,6 +14,7 @@ class RandBox(nn.Module):
     """
 
     def __init__(self,
+                 flip=True,
                  nms_thr=0.7,
                  num_of_init_boxes=2000,
                  min_scale_rate=0.1,
@@ -21,31 +22,68 @@ class RandBox(nn.Module):
                  max_num_of_final_box=50):
         super(RandBox, self).__init__()
 
+        self.flip = flip
         self.nms_thr = nms_thr
         self.num_of_init_boxes = num_of_init_boxes
         self.min_scale_rate = min_scale_rate
         self.min_num_of_final_box = min_num_of_final_box
         self.max_num_of_final_box = max_num_of_final_box
 
-    def forward(self, num_img, device, im_metas):
+    def forward(self, img, im_metas):
         """Forward features from the upstream network.
 
         Args:
-            gt_bboxes (list[Tensor]): Ground truth bboxes for each image with
-                shape (num_gts, 4) in [tl_x, tl_y, br_x, br_y] format.
+            img (Tensor): of shape (N, C * 2, H, W) encoding input images.
+                Typically these should be mean centered and std scaled.
 
+            img_metas (list[dict]): list of image info dict where each dict
+                has: 'img_shape', 'scale_factor', 'flip', and may also contain
+                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
+                For details on the values of these keys see
+                `mmdet/datasets/pipelines/formatting.py:Collect`.
 
         Returns:
-            tuple: A tuple of classification scores and bbox prediction.
+            rand_box_1 (list[Tensor]): random boxes like gt_bboxes
+                in [lt_x, lt_y, rb_x, rb_y] format.
 
-                - cls_scores (list[Tensor]): Classification scores for all \
-                    scale levels, each is a 4D-tensor, the channels number \
-                    is num_anchors * num_classes.
-                - bbox_preds (list[Tensor]): Box energies / deltas for all \
-                    scale levels, each is a 4D-tensor, the channels number \
-                    is num_anchors * 4.
+            rand_box_2 (list[Tensor]): if self.flip is True,
+                this is horizontal flipped rand_box_1.
+
+            img_1 (Tensor): of shape (N, C, H, W) encoding input images.
+                Typically these should be mean centered and std scaled.
+
+            img_2 (Tensor): of shape (N, C, H, W) encoding input images.
+                if self.flip is True, horizontal flipped.
         """
 
+        device = img.device
+        num_img = img.size(0)
+
+        with torch.no_grad():
+            img_1 = img[:, :3, :, :]
+            img_2 = img[:, 3:, :, :]
+
+            rand_box_1 = self.generate_rand_box(im_metas, device, num_img)
+
+            if self.flip:
+                rand_box_2 = []
+                for i in range(num_img):
+                    boxes_1 = rand_box_1[i]
+                    shape = im_metas[i]['img_shape']
+
+                    boxes_2 = boxes_1.clone()
+                    boxes_2[:, 0] = shape[1] - (boxes_1.clone()[:, 2] + 1)
+                    boxes_2[:, 2] = shape[1] - (boxes_1.clone()[:, 0] + 1)
+                    rand_box_2.append(boxes_2)
+
+                    img_2[i, :, :shape[0], :shape[1]] = \
+                        img_2[i, :, :shape[0], :shape[1]].flip(dims=(-1,))
+            else:
+                rand_box_2 = rand_box_1
+
+        return rand_box_1, rand_box_2, img_1, img_2
+
+    def generate_rand_box(self, im_metas, device, num_img):
         rand_boxes_init = \
             torch.rand(num_img, self.num_of_init_boxes, 4).to(device)
         pre_rand_boxes = torch.zeros_like(rand_boxes_init).to(device)
