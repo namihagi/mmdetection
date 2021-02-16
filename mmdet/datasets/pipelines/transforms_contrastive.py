@@ -1,27 +1,13 @@
-import inspect
-
+import cv2
 import mmcv
 import numpy as np
-from numpy import random
-
 from copy import deepcopy
-from mmdet.core import PolygonMasks
-from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
+from numpy import random
+from PIL import Image, ImageFilter
+from torchvision import transforms
+
 from ..builder import PIPELINES
-
-from .transforms import Resize, Normalize, Pad
-
-try:
-    from imagecorruptions import corrupt
-except ImportError:
-    corrupt = None
-
-try:
-    import albumentations
-    from albumentations import Compose
-except ImportError:
-    albumentations = None
-    Compose = None
+from .transforms import Normalize, Pad, Resize
 
 
 @PIPELINES.register_module()
@@ -119,20 +105,27 @@ class PhotoMetricDistortionForContrastive(object):
         if 'img_fields' in results:
             assert results['img_fields'] == ['img'], \
                 'Only single img_fields is allowed'
-        img = results['img']
-        img_2 = deepcopy(img)
-        assert img.dtype == np.float32, \
+        img_1 = results['img']
+        img_2 = deepcopy(img_1)
+        assert img_1.dtype == np.float32, \
             'PhotoMetricDistortion needs the input image of dtype np.float32,'\
             ' please set "to_float32=True" in "LoadImageFromFile" pipeline'
+
+        img_1 = self.augment(img_1)
+        img_2 = self.augment(img_2)
+
+        # concat images
+        img_concat = np.concatenate([img_1, img_2], axis=-1)
+
+        results['img'] = img_concat
+        return results
+
+    def augment(self, img):
         # random brightness
         if random.randint(2):
             delta = random.uniform(-self.brightness_delta,
                                    self.brightness_delta)
             img += delta
-        if random.randint(2):
-            delta_2 = random.uniform(-self.brightness_delta,
-                                     self.brightness_delta)
-            img_2 += delta_2
 
         # mode == 0 --> do random contrast first
         # mode == 1 --> do random contrast last
@@ -142,38 +135,23 @@ class PhotoMetricDistortionForContrastive(object):
                 alpha = random.uniform(self.contrast_lower,
                                        self.contrast_upper)
                 img *= alpha
-        mode_2 = random.randint(2)
-        if mode_2 == 1:
-            if random.randint(2):
-                alpha_2 = random.uniform(self.contrast_lower,
-                                         self.contrast_upper)
-                img_2 *= alpha_2
 
         # convert color from BGR to HSV
         img = mmcv.bgr2hsv(img)
-        img_2 = mmcv.bgr2hsv(img_2)
 
         # random saturation
         if random.randint(2):
             img[..., 1] *= random.uniform(self.saturation_lower,
                                           self.saturation_upper)
-        if random.randint(2):
-            img_2[..., 1] *= random.uniform(self.saturation_lower,
-                                            self.saturation_upper)
 
         # random hue
         if random.randint(2):
             img[..., 0] += random.uniform(-self.hue_delta, self.hue_delta)
             img[..., 0][img[..., 0] > 360] -= 360
             img[..., 0][img[..., 0] < 0] += 360
-        if random.randint(2):
-            img_2[..., 0] += random.uniform(-self.hue_delta, self.hue_delta)
-            img_2[..., 0][img_2[..., 0] > 360] -= 360
-            img_2[..., 0][img_2[..., 0] < 0] += 360
 
         # convert color from HSV to BGR
         img = mmcv.hsv2bgr(img)
-        img_2 = mmcv.hsv2bgr(img_2)
 
         # random contrast
         if mode == 0:
@@ -181,30 +159,12 @@ class PhotoMetricDistortionForContrastive(object):
                 alpha = random.uniform(self.contrast_lower,
                                        self.contrast_upper)
                 img *= alpha
-        if mode_2 == 0:
-            if random.randint(2):
-                alpha_2 = random.uniform(self.contrast_lower,
-                                         self.contrast_upper)
-                img_2 *= alpha_2
 
         # randomly swap channels
         if random.randint(2):
             img = img[..., random.permutation(3)]
-        if random.randint(2):
-            img_2 = img_2[..., random.permutation(3)]
 
-        # concat images
-        img_concat = np.concatenate([img, img_2], axis=-1)
-
-        img_fig = img - img.min()
-        img_fig = img_fig / img_fig.max()
-        img_fig = np.clip(img_fig, 0, 1)
-        img_fig_2 = img_2 - img_2.min()
-        img_fig_2 = img_fig_2 / img_fig_2.max()
-        img_fig_2 = np.clip(img_fig_2, 0, 1)
-
-        results['img'] = img_concat
-        return results
+        return img
 
     def __repr__(self):
         repr_str = self.__class__.__name__
@@ -260,3 +220,83 @@ class PadForContrastive(Pad):
         results['pad_shape'] = padded_img[:, :, :3].shape
         results['pad_fixed_size'] = self.size
         results['pad_size_divisor'] = self.size_divisor
+
+
+class GaussianBlur(object):
+    """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709"""
+
+    def __init__(self, sigma=[.1, 2.]):
+        self.sigma = sigma
+
+    def __call__(self, x):
+        sigma = random.uniform(self.sigma[0], self.sigma[1])
+        x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
+        return x
+
+
+@PIPELINES.register_module()
+class SimsiamAugmentation(object):
+
+    def __init__(self,
+                 to_rgb=True,
+                 jitter_param=dict(
+                     brightness=0.4,
+                     contrast=0.4,
+                     saturation=0.4,
+                     hue=0.4),
+                 jitter_p=0.8,
+                 grayscale_p=0.2,
+                 gaussian_sigma=[0.1, 2.0],
+                 gaussian_p=0.5):
+
+        self.to_rgb = to_rgb
+
+        self.augmentation = transforms.Compose([
+            transforms.RandomApply([
+                transforms.ColorJitter(**jitter_param)
+            ], p=jitter_p),
+            transforms.RandomGrayscale(p=grayscale_p),
+            transforms.RandomApply([
+                GaussianBlur(sigma=gaussian_sigma)
+            ], p=gaussian_p),
+        ])
+
+    def __call__(self, results):
+        """Call function to perform byol augmentations on images.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Result dict with images distorted.
+        """
+
+        if 'img_fields' in results:
+            assert results['img_fields'] == ['img'], \
+                'Only single img_fields is allowed'
+
+        img_1 = results['img']
+        dtype = img_1.dtype
+
+        if self.to_rgb:
+            img_1 = cv2.cvtColor(img_1, cv2.COLOR_BGR2RGB)
+
+        img_1 = img_1.astype(np.uint8)
+        img_pil_1 = Image.fromarray(img_1, mode="RGB")
+        img_pil_2 = deepcopy(img_pil_1)
+
+        img_1 = self.augment_each_img(img_pil_1, dtype)
+        img_2 = self.augment_each_img(img_pil_2, dtype)
+
+        # concat images
+        img_concat = np.concatenate([img_1, img_2], axis=-1)
+
+        results['img'] = img_concat
+        return results
+
+    def augment_each_img(self, img_pil, dtype):
+        img_pil = self.augmentation(img_pil)
+        img = np.array(img_pil, dtype=dtype)
+        if self.to_rgb:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return img

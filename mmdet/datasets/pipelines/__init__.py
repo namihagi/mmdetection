@@ -15,7 +15,7 @@ from .transforms import (Albu, CutOut, Expand, MinIoURandomCrop, Normalize,
 from .transforms_contrastive import (NormalizeForContrastive,
                                      PadForContrastive,
                                      PhotoMetricDistortionForContrastive,
-                                     ResizeForContrastive)
+                                     ResizeForContrastive, SimsiamAugmentation)
 
 __all__ = [
     'Compose', 'to_tensor', 'ToTensor', 'ImageToTensor', 'ToDataContainer',
@@ -29,5 +29,5 @@ __all__ = [
     'ContrastTransform', 'Translate',
     'DefaultFormatBundleForContrastive',
     'PhotoMetricDistortionForContrastive', 'ResizeForContrastive',
-    'NormalizeForContrastive', 'PadForContrastive'
+    'NormalizeForContrastive', 'PadForContrastive', 'SimsiamAugmentation'
 ]
