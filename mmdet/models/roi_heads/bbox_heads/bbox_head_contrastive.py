@@ -32,3 +32,6 @@ class BBoxHeadForContrastive(nn.Module):
             x = self.avg_pool(x)
         x = x.view(x.size(0), -1)
         return x
+
+    def init_weights(self):
+        pass
