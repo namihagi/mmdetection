@@ -24,13 +24,23 @@ class ProjectionMLP(nn.Module):
             and its variants only.
     """
 
+    style_list = [
+        'simsiam', 'byol'
+    ]
+
     def __init__(self,
                  in_channels,
                  hidden_channels=None,
                  out_channels=None,
+                 mlp_style='simsiam',
                  norm_cfg=dict(type='BN', requires_grad=True),
                  norm_eval=True):
         super(ProjectionMLP, self).__init__()
+
+        assert mlp_style in self.style_list, \
+            f"mlp_style {mlp_style} is not in style_list {self.style_list}."
+        self.mlp_style = mlp_style
+        self.norm_eval = norm_eval
 
         if hidden_channels is None:
             hidden_channels = in_channels
@@ -38,25 +48,35 @@ class ProjectionMLP(nn.Module):
         if out_channels is None:
             out_channels = in_channels
 
-        self.layer1 = nn.Sequential(
-            nn.Linear(in_channels, hidden_channels),
-            build_norm_layer(norm_cfg, hidden_channels)[1],
-            nn.ReLU(inplace=True))
-        self.layer2 = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels),
-            build_norm_layer(norm_cfg, hidden_channels)[1],
-            nn.ReLU(inplace=True)
-        )
-        self.layer3 = nn.Sequential(
-            nn.Linear(hidden_channels, out_channels),
-            build_norm_layer(norm_cfg, out_channels)[1],
-        )
-        self.norm_eval = norm_eval
+        if self.mlp_style == 'simsiam':
+            self.layer1 = nn.Sequential(
+                nn.Linear(in_channels, hidden_channels),
+                build_norm_layer(norm_cfg, hidden_channels)[1],
+                nn.ReLU(inplace=True))
+            self.layer2 = nn.Sequential(
+                nn.Linear(hidden_channels, hidden_channels),
+                build_norm_layer(norm_cfg, hidden_channels)[1],
+                nn.ReLU(inplace=True)
+            )
+            self.layer3 = nn.Sequential(
+                nn.Linear(hidden_channels, out_channels),
+                build_norm_layer(norm_cfg, out_channels)[1],
+            )
+        elif self.mlp_style == 'byol':
+            self.layer1 = nn.Sequential(
+                nn.Linear(in_channels, hidden_channels),
+                build_norm_layer(norm_cfg, hidden_channels)[1],
+                nn.ReLU(inplace=True))
+            self.layer2 = nn.Sequential(
+                nn.Linear(hidden_channels, out_channels))
+        else:
+            raise NotImplementedError
 
     def forward(self, x):
         x = self.layer1(x)
         x = self.layer2(x)
-        x = self.layer3(x)
+        if self.mlp_style == 'simsiam':
+            x = self.layer3(x)
         return x
 
     def train(self, mode=True):
@@ -82,13 +102,23 @@ class PredictionMLP(nn.Module):
             and its variants only.
     """
 
+    style_list = [
+        'simsiam', 'byol'
+    ]
+
     def __init__(self,
                  in_channels,
                  hidden_channels=None,
                  out_channels=None,
+                 mlp_style='simsiam',
                  norm_cfg=dict(type='BN', requires_grad=True),
                  norm_eval=True):
         super(PredictionMLP, self).__init__()
+
+        assert mlp_style in self.style_list, \
+            f"mlp_style {mlp_style} is not in style_list {self.style_list}."
+        self.mlp_style = mlp_style
+        self.norm_eval = norm_eval
 
         if hidden_channels is None:
             hidden_channels = in_channels // 4
@@ -96,11 +126,21 @@ class PredictionMLP(nn.Module):
         if out_channels is None:
             out_channels = in_channels
 
-        self.layer1 = nn.Sequential(
-            nn.Linear(in_channels, hidden_channels),
-            build_norm_layer(norm_cfg, hidden_channels)[1],
-            nn.ReLU(inplace=True))
-        self.layer2 = nn.Linear(hidden_channels, out_channels)
+        if self.mlp_style == 'simsiam':
+            self.layer1 = nn.Sequential(
+                nn.Linear(in_channels, hidden_channels),
+                build_norm_layer(norm_cfg, hidden_channels)[1],
+                nn.ReLU(inplace=True))
+            self.layer2 = nn.Linear(hidden_channels, out_channels)
+        elif self.mlp_style == 'byol':
+            self.layer1 = nn.Sequential(
+                nn.Linear(in_channels, hidden_channels),
+                build_norm_layer(norm_cfg, hidden_channels)[1],
+                nn.ReLU(inplace=True))
+            self.layer2 = nn.Sequential(
+                nn.Linear(hidden_channels, out_channels))
+        else:
+            raise NotImplementedError
 
         self.norm_eval = norm_eval
 
