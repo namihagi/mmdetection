@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from mmcv.ops import nms
 
-from mmdet.core import multi_apply
 from ..builder import RAND_BOX
 
 
@@ -19,7 +18,9 @@ class RandBox(nn.Module):
                  num_of_init_boxes=2000,
                  min_scale_rate=0.1,
                  min_num_of_final_box=5,
-                 max_num_of_final_box=50):
+                 max_num_of_final_box=50,
+                 box_augment=False,
+                 box_augment_scale=0.3):
         super(RandBox, self).__init__()
 
         self.flip = flip
@@ -28,6 +29,10 @@ class RandBox(nn.Module):
         self.min_scale_rate = min_scale_rate
         self.min_num_of_final_box = min_num_of_final_box
         self.max_num_of_final_box = max_num_of_final_box
+        self.box_augment = box_augment
+        self.box_augment_scale = box_augment_scale
+        assert 0 < self.box_augment_scale < 0.5, \
+            "self.box_augment_scale need to in range [0, 0.5]."
 
     def forward(self, img, im_metas):
         """Forward features from the upstream network.
@@ -79,7 +84,13 @@ class RandBox(nn.Module):
                     img_2[i, :, :shape[0], :shape[1]] = \
                         img_2[i, :, :shape[0], :shape[1]].flip(dims=(-1,))
             else:
-                rand_box_2 = rand_box_1
+                rand_box_2 = rand_box_1.clone()
+
+            if self.box_augment:
+                rand_box_1 = self.augment_bbox(rand_box_1, num_img,
+                                               device, im_metas)
+                rand_box_2 = self.augment_bbox(rand_box_2, num_img,
+                                               device, im_metas)
 
         return rand_box_1, rand_box_2, img_1, img_2
 
@@ -155,6 +166,34 @@ class RandBox(nn.Module):
                 rand_boxes.append(dets[:num_of_final_boxes, :4])
 
         return rand_boxes
+
+    def augment_bbox(self, bboxes_list, num_img, device, im_metas):
+
+        for i in range(num_img):
+            bboxes = bboxes_list[i]
+            shape = im_metas[i]['img_shape']
+            num_box = bboxes.size(0)
+
+            base_width = \
+                (bboxes[:, 2] - bboxes[:, 0]) * self.box_augment_scale
+            base_height = \
+                (bboxes[:, 3] - bboxes[:, 1]) * self.box_augment_scale
+
+            rand_offset = torch.rand(num_box, 4).to(device)
+            rand_offset = (rand_offset * 2) - 1.0
+
+            offset_width = \
+                base_width.view(-1, 1) * rand_offset[:, 0::2]
+            offset_height = \
+                base_height.view(-1, 1) * rand_offset[:, 1::2]
+
+            bboxes[:, 0::2] += offset_width
+            bboxes[:, 1::2] += offset_height
+
+            bboxes[:, 0::2] = bboxes[:, 0::2].clamp(0, shape[1])
+            bboxes[:, 1::2] = bboxes[:, 1::2].clamp(0, shape[0])
+
+        return bboxes_list
 
 
 if __name__ == "__main__":
