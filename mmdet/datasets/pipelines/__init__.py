@@ -4,7 +4,8 @@ from .auto_augment import (AutoAugment, BrightnessTransform, ColorTransform,
 from .compose import Compose
 from .formating import (Collect, DefaultFormatBundle, ImageToTensor,
                         ToDataContainer, ToTensor, Transpose, to_tensor)
-from .formating_contrastive import DefaultFormatBundleForContrastive
+from .formating_contrastive import (CollectForContrastive,
+                                    DefaultFormatBundleForContrastive)
 from .instaboost import InstaBoost
 from .loading import (LoadAnnotations, LoadImageFromFile, LoadImageFromWebcam,
                       LoadMultiChannelImageFromFiles, LoadProposals)
@@ -15,6 +16,7 @@ from .transforms import (Albu, CutOut, Expand, MinIoURandomCrop, Normalize,
 from .transforms_contrastive import (NormalizeForContrastive,
                                      PadForContrastive,
                                      PhotoMetricDistortionForContrastive,
+                                     RandomFlipForContrastive,
                                      ResizeForContrastive, SimsiamAugmentation)
 
 __all__ = [
@@ -29,5 +31,6 @@ __all__ = [
     'ContrastTransform', 'Translate',
     'DefaultFormatBundleForContrastive',
     'PhotoMetricDistortionForContrastive', 'ResizeForContrastive',
-    'NormalizeForContrastive', 'PadForContrastive', 'SimsiamAugmentation'
+    'NormalizeForContrastive', 'PadForContrastive', 'SimsiamAugmentation',
+    'RandomFlipForContrastive', 'CollectForContrastive'
 ]

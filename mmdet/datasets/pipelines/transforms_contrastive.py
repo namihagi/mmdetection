@@ -7,57 +7,109 @@ from PIL import Image, ImageFilter
 from torchvision import transforms
 
 from ..builder import PIPELINES
-from .transforms import Normalize, Pad, Resize
+from .transforms import Normalize, Pad, RandomFlip, Resize
 
 
 @PIPELINES.register_module()
 class ResizeForContrastive(Resize):
 
-    def _resize_img(self, results):
-        """Resize images with ``results['scale']``."""
-        for key in results.get('img_fields', ['img']):
-            if self.keep_ratio:
-                img_1 = deepcopy(results[key][:, :, :3])
-                img_1, scale_factor = mmcv.imrescale(
-                    img_1,
-                    results['scale'],
-                    return_scale=True,
-                    backend=self.backend)
-                img_2 = deepcopy(results[key][:, :, 3:])
-                img_2, scale_factor = mmcv.imrescale(
-                    img_2,
-                    results['scale'],
-                    return_scale=True,
-                    backend=self.backend)
-                # the w_scale and h_scale has minor difference
-                # a real fix should be done in the mmcv.imrescale in the future
-                new_h, new_w = img_1.shape[:2]
-                h, w = results[key].shape[:2]
-                w_scale = new_w / w
-                h_scale = new_h / h
-            else:
-                img_1 = deepcopy(results[key][:, :, :3])
-                img_1, w_scale, h_scale = mmcv.imresize(
-                    img_1,
-                    results['scale'],
-                    return_scale=True,
-                    backend=self.backend)
-                img_2 = deepcopy(results[key][:, :, :3])
-                img_2, w_scale, h_scale = mmcv.imresize(
-                    img_2,
-                    results['scale'],
-                    return_scale=True,
-                    backend=self.backend)
-            img = np.concatenate([img_1, img_2], axis=-1)
-            results[key] = img
+    def __init__(self, same_scale=True, **kwarg):
+        super(ResizeForContrastive, self).__init__(**kwarg)
 
-            scale_factor = np.array([w_scale, h_scale, w_scale, h_scale],
-                                    dtype=np.float32)
-            results['img_shape'] = img[:, :, :3].shape
-            # in case that there is no padding
-            results['pad_shape'] = img[:, :, :3].shape
-            results['scale_factor'] = scale_factor
-            results['keep_ratio'] = self.keep_ratio
+        self.same_scale = same_scale
+
+    def _resize_img(self, results):
+        if self.same_scale:
+            """Resize images with ``results['scale']``."""
+            for key in results.get('img_fields', ['img']):
+                if self.keep_ratio:
+                    img_1 = deepcopy(results[key][:, :, :3])
+                    img_1, scale_factor = mmcv.imrescale(
+                        img_1,
+                        results['scale'],
+                        return_scale=True,
+                        backend=self.backend)
+                    img_2 = deepcopy(results[key][:, :, 3:])
+                    img_2, scale_factor = mmcv.imrescale(
+                        img_2,
+                        results['scale'],
+                        return_scale=True,
+                        backend=self.backend)
+                    # the w_scale and h_scale has minor difference
+                    # a real fix should be done in the mmcv.imrescale in the future
+                    new_h, new_w = img_1.shape[:2]
+                    h, w = results[key].shape[:2]
+                    w_scale = new_w / w
+                    h_scale = new_h / h
+                else:
+                    img_1 = deepcopy(results[key][:, :, :3])
+                    img_1, w_scale, h_scale = mmcv.imresize(
+                        img_1,
+                        results['scale'],
+                        return_scale=True,
+                        backend=self.backend)
+                    img_2 = deepcopy(results[key][:, :, :3])
+                    img_2, w_scale, h_scale = mmcv.imresize(
+                        img_2,
+                        results['scale'],
+                        return_scale=True,
+                        backend=self.backend)
+                img = np.concatenate([img_1, img_2], axis=-1)
+                results[key] = img
+
+                scale_factor = np.array([w_scale, h_scale, w_scale, h_scale],
+                                        dtype=np.float32)
+                results['img_shape'] = img[:, :, :3].shape
+                # in case that there is no padding
+                results['pad_shape'] = img[:, :, :3].shape
+                results['scale_factor'] = scale_factor
+                results['keep_ratio'] = self.keep_ratio
+
+        else:
+            super()._resize_img(results)
+
+    def __call__(self, results):
+        if self.same_scale:
+            assert not isinstance(results, tuple)
+            return super().__call__(results)
+
+        else:
+            assert isinstance(results, tuple)
+            results_1 = results[0]
+            results_2 = results[1]
+
+            results_1 = super().__call__(results_1)
+            results_2 = super().__call__(results_2)
+
+            return tuple([results_1, results_2])
+
+
+@PIPELINES.register_module()
+class RandomFlipForContrastive(RandomFlip):
+
+    def __init__(self, same_scale=True, **kwarg):
+        super(RandomFlipForContrastive, self).__init__(**kwarg)
+
+        self.same_scale = same_scale
+
+    def __call__(self, results):
+        if self.same_scale:
+            assert not isinstance(results, tuple)
+            return super().__call__(results)
+
+        else:
+            assert isinstance(results, tuple)
+            results_1 = results[0]
+            results_2 = results[1]
+
+            results_1 = super().__call__(results_1)
+            flip_dict = dict(
+                flip=results_1['flip'],
+                flip_direction=results_1['flip_direction'])
+            results_2.update(flip_dict)
+            results_2 = super().__call__(results_2)
+
+            return tuple([results_1, results_2])
 
 
 @PIPELINES.register_module()
@@ -180,6 +232,11 @@ class PhotoMetricDistortionForContrastive(object):
 @PIPELINES.register_module()
 class NormalizeForContrastive(Normalize):
 
+    def __init__(self, same_scale=True, **kwarg):
+        super(NormalizeForContrastive, self).__init__(**kwarg)
+
+        self.same_scale = same_scale
+
     def __call__(self, results):
         """Call function to normalize images.
 
@@ -190,36 +247,73 @@ class NormalizeForContrastive(Normalize):
             dict: Normalized results, 'img_norm_cfg' key is added into
                 result dict.
         """
-        for key in results.get('img_fields', ['img']):
-            img_1 = deepcopy(results[key][:, :, :3])
-            img_1 = mmcv.imnormalize(img_1, self.mean, self.std,
-                                     self.to_rgb)
-            img_2 = deepcopy(results[key][:, :, 3:])
-            img_2 = mmcv.imnormalize(img_2, self.mean, self.std,
-                                     self.to_rgb)
-            img = np.concatenate([img_1, img_2], axis=-1)
-            results[key] = img
-        results['img_norm_cfg'] = dict(
-            mean=self.mean, std=self.std, to_rgb=self.to_rgb)
-        return results
+        if self.same_scale:
+            assert not isinstance(results, tuple)
+
+            for key in results.get('img_fields', ['img']):
+                img_1 = deepcopy(results[key][:, :, :3])
+                img_1 = mmcv.imnormalize(img_1, self.mean, self.std,
+                                         self.to_rgb)
+                img_2 = deepcopy(results[key][:, :, 3:])
+                img_2 = mmcv.imnormalize(img_2, self.mean, self.std,
+                                         self.to_rgb)
+                img = np.concatenate([img_1, img_2], axis=-1)
+                results[key] = img
+            results['img_norm_cfg'] = dict(
+                mean=self.mean, std=self.std, to_rgb=self.to_rgb)
+            return results
+
+        else:
+            assert isinstance(results, tuple)
+            results_1 = results[0]
+            results_2 = results[1]
+
+            results_1 = super().__call__(results_1)
+            results_2 = super().__call__(results_2)
+
+            return tuple([results_1, results_2])
 
 
 @PIPELINES.register_module()
 class PadForContrastive(Pad):
 
+    def __init__(self, same_scale=True, **kwarg):
+        super(PadForContrastive, self).__init__(**kwarg)
+
+        self.same_scale = same_scale
+
     def _pad_img(self, results):
-        """Pad images according to ``self.size``."""
-        for key in results.get('img_fields', ['img']):
-            if self.size is not None:
-                padded_img = mmcv.impad(
-                    results[key], shape=self.size, pad_val=self.pad_val)
-            elif self.size_divisor is not None:
-                padded_img = mmcv.impad_to_multiple(
-                    results[key], self.size_divisor, pad_val=self.pad_val)
-            results[key] = padded_img
-        results['pad_shape'] = padded_img[:, :, :3].shape
-        results['pad_fixed_size'] = self.size
-        results['pad_size_divisor'] = self.size_divisor
+        if self.same_scale:
+            """Pad images according to ``self.size``."""
+            for key in results.get('img_fields', ['img']):
+                if self.size is not None:
+                    padded_img = mmcv.impad(
+                        results[key], shape=self.size, pad_val=self.pad_val)
+                elif self.size_divisor is not None:
+                    padded_img = mmcv.impad_to_multiple(
+                        results[key], self.size_divisor, pad_val=self.pad_val)
+                results[key] = padded_img
+            results['pad_shape'] = padded_img[:, :, :3].shape
+            results['pad_fixed_size'] = self.size
+            results['pad_size_divisor'] = self.size_divisor
+
+        else:
+            super()._pad_img(results)
+
+    def __call__(self, results):
+        if self.same_scale:
+            assert not isinstance(results, tuple)
+            return super().__call__(results)
+
+        else:
+            assert isinstance(results, tuple)
+            results_1 = results[0]
+            results_2 = results[1]
+
+            results_1 = super().__call__(results_1)
+            results_2 = super().__call__(results_2)
+
+            return tuple([results_1, results_2])
 
 
 class GaussianBlur(object):
@@ -239,6 +333,7 @@ class SimsiamAugmentation(object):
 
     def __init__(self,
                  to_rgb=True,
+                 same_scale=True,
                  jitter_param=dict(
                      brightness=0.4,
                      contrast=0.4,
@@ -250,6 +345,7 @@ class SimsiamAugmentation(object):
                  gaussian_p=0.5):
 
         self.to_rgb = to_rgb
+        self.same_scale = same_scale
 
         self.augmentation = transforms.Compose([
             transforms.RandomApply([
@@ -288,11 +384,21 @@ class SimsiamAugmentation(object):
         img_1 = self.augment_each_img(img_pil_1, dtype)
         img_2 = self.augment_each_img(img_pil_2, dtype)
 
-        # concat images
-        img_concat = np.concatenate([img_1, img_2], axis=-1)
+        if self.same_scale:
+            # concat images
+            img_concat = np.concatenate([img_1, img_2], axis=-1)
 
-        results['img'] = img_concat
-        return results
+            results['img'] = img_concat
+            return results
+
+        else:
+            results_1 = deepcopy(results)
+            results['img_1'] = img_1
+
+            results_2 = deepcopy(results)
+            results['img_2'] = img_2
+
+            return tuple([results_1, results_2])
 
     def augment_each_img(self, img_pil, dtype):
         img_pil = self.augmentation(img_pil)
