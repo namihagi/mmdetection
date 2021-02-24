@@ -25,6 +25,7 @@ class RandBox(nn.Module):
 
         self.flip = flip
         self.nms_thr = nms_thr
+        self.with_nms = self.nms_thr is not None
         self.num_of_init_boxes = num_of_init_boxes
         self.min_scale_rate = min_scale_rate
         self.min_num_of_final_box = min_num_of_final_box
@@ -84,7 +85,7 @@ class RandBox(nn.Module):
                     img_2[i, :, :shape[0], :shape[1]] = \
                         img_2[i, :, :shape[0], :shape[1]].flip(dims=(-1,))
             else:
-                rand_box_2 = rand_box_1.clone()
+                rand_box_2 = rand_box_1
 
             if self.box_augment:
                 rand_box_1 = self.augment_bbox(rand_box_1, num_img,
@@ -116,8 +117,9 @@ class RandBox(nn.Module):
                         rand_boxes_init[:, :, 3], rand_boxes_init[:, :, 1])
 
         # pseudo batch_scores
-        pseudo_scores = \
-            torch.rand(num_img, self.num_of_init_boxes, 1).to(device)
+        if self.with_nms:
+            pseudo_scores = \
+                torch.rand(num_img, self.num_of_init_boxes, 1).to(device)
 
         num_of_boxes_per_img = torch.randint(self.min_num_of_final_box,
                                              self.max_num_of_final_box,
@@ -127,7 +129,8 @@ class RandBox(nn.Module):
         for i in range(num_img):
             shape = im_metas[i]['img_shape']
             pre_rand_box = pre_rand_boxes[i]
-            pseudo_score = pseudo_scores[i]
+            if self.with_nms:
+                pseudo_score = pseudo_scores[i]
             num_of_final_boxes = num_of_boxes_per_img[i]
 
             # rescale length of box
@@ -147,17 +150,22 @@ class RandBox(nn.Module):
 
             # get boxes and scores to keep
             pre_rand_box_keep = pre_rand_box[box_keep_idx]
-            pseudo_score_keep = pseudo_score[box_keep_idx]
+            if self.with_nms:
+                pseudo_score_keep = pseudo_score[box_keep_idx]
 
-            # sort boxes and scores about scores
-            sorted_psuedo_score, order = torch.sort(pseudo_score_keep, 0, True)
-            sorted_pre_rand_box_keep = pre_rand_box_keep[order]
+            if self.with_nms:
+                # sort boxes and scores about scores
+                sorted_psuedo_score, order = \
+                    torch.sort(pseudo_score_keep, 0, True)
+                sorted_pre_rand_box_keep = pre_rand_box_keep[order]
 
-            # nms
-            # dets's shape: [num_box, 5] in [lt_x, lt_y, rb_x, rb_y, score]
-            dets, _ = nms(sorted_pre_rand_box_keep.view(-1, 4),
-                          sorted_psuedo_score.view(-1),
-                          self.nms_thr)
+                # nms
+                # dets's shape: [num_box, 5] in [lt_x, lt_y, rb_x, rb_y, score]
+                dets, _ = nms(sorted_pre_rand_box_keep.view(-1, 4),
+                              sorted_psuedo_score.view(-1),
+                              self.nms_thr)
+            else:
+                dets = pre_rand_box_keep.view(-1, 4)
 
             # take topN from boxes after nms
             if dets.size(0) < num_of_final_boxes:
