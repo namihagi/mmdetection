@@ -1,3 +1,5 @@
+from mmcv.runner.fp16_utils import auto_fp16
+from numpy.lib.arraysetops import isin
 import torch
 import torch.nn as nn
 
@@ -24,10 +26,12 @@ class TwoStageDetectorForContrastive(BaseDetector):
                  roi_head=None,
                  train_cfg=None,
                  test_cfg=None,
-                 pretrained=None):
+                 pretrained=None,
+                 same_scale=True):
         super(TwoStageDetectorForContrastive, self).__init__()
         self.backbone = build_backbone(backbone)
 
+        rand_box.update(dict(same_scale=same_scale))
         self.gen_rand_box = build_rand_box(rand_box)
         self.contrastive_cfg = train_cfg.pop("contrastive", None)
         assert self.contrastive_cfg is not None, \
@@ -54,6 +58,7 @@ class TwoStageDetectorForContrastive(BaseDetector):
 
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
+        self.same_scale = same_scale
 
         self.init_weights(pretrained=pretrained)
 
@@ -112,10 +117,8 @@ class TwoStageDetectorForContrastive(BaseDetector):
         outs = outs + (roi_outs, )
         return outs
 
-    def forward_train(self,
-                      img,
-                      img_metas,
-                      **kwargs):
+    def forward_train(self, img, img_metas,
+                      img_2=None, img_metas_2=None, **kwargs):
         """
         Args:
             img (Tensor): of shape (N, C, H, W) encoding input images.
@@ -145,15 +148,40 @@ class TwoStageDetectorForContrastive(BaseDetector):
             dict[str, Tensor]: a dictionary of loss components
         """
 
-        pseudo_gt_bboxes_1, pseudo_gt_bboxes_2, \
-            img_1, img_2 = self.gen_rand_box(img, img_metas)
-
         losses = dict()
 
-        roi_feats_1 = self.forward_each_img(
-            img_1, img_metas, 1, pseudo_gt_bboxes_1, losses)
-        roi_feats_2 = self.forward_each_img(
-            img_2, img_metas, 2, pseudo_gt_bboxes_2, losses)
+        if self.same_scale:
+            rand_box_input = dict(
+                img=img,
+                img_metas=img_metas)
+
+            pseudo_gt_bboxes_1, pseudo_gt_bboxes_2, \
+                img_1, img_2 = self.gen_rand_box(rand_box_input)
+
+            roi_feats_1 = self.forward_each_img(
+                img_1, img_metas, 1, pseudo_gt_bboxes_1, losses)
+            roi_feats_2 = self.forward_each_img(
+                img_2, img_metas, 2, pseudo_gt_bboxes_2, losses)
+
+        else:
+            assert img_2 is not None and img_metas_2 is not None
+
+            img_1 = img
+            img_metas_1 = img_metas
+
+            rand_box_input = dict(
+                img_1=img_1,
+                img_metas_1=img_metas_1,
+                img_2=img_2,
+                img_metas_2=img_metas_2)
+
+            pseudo_gt_bboxes_1, pseudo_gt_bboxes_2, \
+                img_1, img_2 = self.gen_rand_box(rand_box_input)
+
+            roi_feats_1 = self.forward_each_img(
+                img_1, img_metas_1, 1, pseudo_gt_bboxes_1, losses)
+            roi_feats_2 = self.forward_each_img(
+                img_2, img_metas_2, 2, pseudo_gt_bboxes_2, losses)
 
         # forward projection, prediction and loss
         constrastive_losses = self.contrastive_head(roi_feats_1,
@@ -162,7 +190,7 @@ class TwoStageDetectorForContrastive(BaseDetector):
         return losses
 
     def forward_each_img(self, img, img_metas, img_id,
-                         pseudo_gt_bboxes, losses):
+                         pseudo_gt_bboxes, losses=None):
         assert isinstance(img_id, int)
 
         x = self.extract_feat(img)
@@ -179,6 +207,40 @@ class TwoStageDetectorForContrastive(BaseDetector):
         roi_feats = self.roi_head.forward_train(x, pseudo_gt_bboxes)
 
         return roi_feats
+
+    def train_step(self, data, optimizer):
+        losses = self(data)
+
+        loss, log_vars = self._parse_losses(losses)
+
+        if not isinstance(data, list):
+            data = [data]
+        outputs = dict(loss=loss, log_vars=log_vars,
+                       num_samples=len(data[0]['img_metas']))
+
+        return outputs
+
+    def forward(self, data, **kwargs):
+        if self.same_scale:
+            return self.forward_same_scale(**data)
+        else:
+            input_data = dict(
+                img=data[0]['img'],
+                img_metas=data[0]['img_metas'],
+                img_2=data[1]['img'],
+                img_metas_2=data[1]['img_metas'])
+            return self.forward_diff_scale(**input_data)
+
+    @auto_fp16(apply_to=('img', ))
+    def forward_same_scale(self, img, img_metas, **kwargs):
+        return self.forward_train(img, img_metas, **kwargs)
+
+    @auto_fp16(apply_to=('img_1', 'img_2'))
+    def forward_diff_scale(self,
+                           img, img_metas,
+                           img_2, img_metas_2, **kwargs):
+        return self.forward_train(img, img_metas,
+                                  img_2, img_metas_2, **kwargs)
 
     async def async_simple_test(self,
                                 img,

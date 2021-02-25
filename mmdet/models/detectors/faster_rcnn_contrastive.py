@@ -15,7 +15,8 @@ class FasterRCNNForContrastive(TwoStageDetectorForContrastive):
                  train_cfg,
                  test_cfg,
                  neck=None,
-                 pretrained=None):
+                 pretrained=None,
+                 same_scale=True):
         super(FasterRCNNForContrastive, self).__init__(
             backbone=backbone,
             rand_box=rand_box,
@@ -25,4 +26,5 @@ class FasterRCNNForContrastive(TwoStageDetectorForContrastive):
             roi_head=roi_head,
             train_cfg=train_cfg,
             test_cfg=test_cfg,
-            pretrained=pretrained)
+            pretrained=pretrained,
+            same_scale=same_scale)

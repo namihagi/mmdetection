@@ -1,6 +1,7 @@
+import numpy as np
 import torch
-from torch import nn
 from mmcv.ops import nms
+from torch import nn
 
 from ..builder import RAND_BOX
 
@@ -20,7 +21,8 @@ class RandBox(nn.Module):
                  min_num_of_final_box=5,
                  max_num_of_final_box=50,
                  box_augment=False,
-                 box_augment_scale=0.3):
+                 box_augment_scale=0.3,
+                 same_scale=True):
         super(RandBox, self).__init__()
 
         self.flip = flip
@@ -35,7 +37,18 @@ class RandBox(nn.Module):
         assert 0 < self.box_augment_scale < 0.5, \
             "self.box_augment_scale need to in range [0, 0.5]."
 
-    def forward(self, img, im_metas):
+        self.same_scale = same_scale
+
+    def forward(self, rand_box_input):
+
+        if self.same_scale:
+            return self.forward_single(**rand_box_input)
+
+        else:
+            assert 'img_2' in rand_box_input
+            return self.forward_diff_scale(**rand_box_input)
+
+    def forward_single(self, img, img_metas):
         """Forward features from the upstream network.
 
         Args:
@@ -69,33 +82,58 @@ class RandBox(nn.Module):
             img_1 = img[:, :3, :, :]
             img_2 = img[:, 3:, :, :]
 
-            rand_box_1 = self.generate_rand_box(im_metas, device, num_img)
+            rand_box_1 = self.generate_rand_box(img_metas, device, num_img)
 
             if self.flip:
-                rand_box_2 = []
-                for i in range(num_img):
-                    boxes_1 = rand_box_1[i]
-                    shape = im_metas[i]['img_shape']
-
-                    boxes_2 = boxes_1.clone()
-                    boxes_2[:, 0] = shape[1] - (boxes_1.clone()[:, 2] + 1)
-                    boxes_2[:, 2] = shape[1] - (boxes_1.clone()[:, 0] + 1)
-                    rand_box_2.append(boxes_2)
-
-                    img_2[i, :, :shape[0], :shape[1]] = \
-                        img_2[i, :, :shape[0], :shape[1]].flip(dims=(-1,))
+                rand_box_2, img_2 = self.flip_img_and_boxes(img_2, rand_box_1,
+                                                            img_metas, num_img)
             else:
                 rand_box_2 = rand_box_1
 
             if self.box_augment:
                 rand_box_1 = self.augment_bbox(rand_box_1, num_img,
-                                               device, im_metas)
+                                               device, img_metas)
                 rand_box_2 = self.augment_bbox(rand_box_2, num_img,
-                                               device, im_metas)
+                                               device, img_metas)
 
         return rand_box_1, rand_box_2, img_1, img_2
 
-    def generate_rand_box(self, im_metas, device, num_img):
+    def forward_diff_scale(self,
+                           img_1, img_metas_1,
+                           img_2, img_metas_2):
+
+        device = img_1.device
+        num_img = img_1.size(0)
+
+        with torch.no_grad():
+            assert img_metas_1[0]['ori_shape'] == img_metas_2[0]['ori_shape']
+
+            rand_box_ori = self.generate_rand_box(img_metas_1, device,
+                                                  num_img, shape_key='ori_shape')
+
+            rand_box_1 = self.resize_box_in_img_shape(rand_box_ori,
+                                                      img_metas_1,
+                                                      num_img,
+                                                      device)
+            rand_box_2 = self.resize_box_in_img_shape(rand_box_ori,
+                                                      img_metas_2,
+                                                      num_img,
+                                                      device)
+
+            if self.flip:
+                rand_box_2, img_2 = self.flip_img_and_boxes(img_2, rand_box_2,
+                                                            img_metas_2, num_img)
+
+            if self.box_augment:
+                rand_box_1 = self.augment_bbox(rand_box_1, num_img,
+                                               device, img_metas_1)
+                rand_box_2 = self.augment_bbox(rand_box_2, num_img,
+                                               device, img_metas_2)
+
+        return rand_box_1, rand_box_2, img_1, img_2
+
+    def generate_rand_box(self, img_metas, device,
+                          num_img, shape_key='img_shape'):
         rand_boxes_init = \
             torch.rand(num_img, self.num_of_init_boxes, 4).to(device)
         pre_rand_boxes = torch.zeros_like(rand_boxes_init).to(device)
@@ -127,7 +165,7 @@ class RandBox(nn.Module):
 
         rand_boxes = []
         for i in range(num_img):
-            shape = im_metas[i]['img_shape']
+            shape = img_metas[i][shape_key]
             pre_rand_box = pre_rand_boxes[i]
             if self.with_nms:
                 pseudo_score = pseudo_scores[i]
@@ -175,11 +213,56 @@ class RandBox(nn.Module):
 
         return rand_boxes
 
-    def augment_bbox(self, bboxes_list, num_img, device, im_metas):
+    def resize_box_in_img_shape(self, rand_box_ori, img_metas,
+                                num_img, device):
+        """
+        args:
+            rand_box_ori (list[Tensor]): random boxes like gt_bboxes
+                in [lt_x, lt_y, rb_x, rb_y] format.
+
+            img_metas (list[dict]): list of image info dict where each dict
+                has: 'img_shape', 'scale_factor', 'flip', and may also contain
+                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
+                For details on the values of these keys see
+                `mmdet/datasets/pipelines/formatting.py:Collect`.
+        """
+
+        resized_rand_box = []
+        for i in range(num_img):
+            ori_box = rand_box_ori[i]
+            scale_factor = img_metas[i]['scale_factor']
+            scale_factor = torch.tensor(scale_factor).to(device)
+            shape = img_metas[i]['img_shape']
+
+            resized_box = ori_box * scale_factor
+            resized_box[:, 0::2] = resized_box[:, 0::2].clamp(0, shape[1])
+            resized_box[:, 1::2] = resized_box[:, 1::2].clamp(0, shape[0])
+            resized_rand_box.append(resized_box)
+
+        return resized_rand_box
+
+    def flip_img_and_boxes(self, img, rand_box, img_metas, num_img):
+        rand_box_flip = []
+
+        for i in range(num_img):
+            box = rand_box[i]
+            shape = img_metas[i]['img_shape']
+
+            box_flip = box.clone()
+            box_flip[:, 0] = shape[1] - (box.clone()[:, 2] + 1)
+            box_flip[:, 2] = shape[1] - (box.clone()[:, 0] + 1)
+            rand_box_flip.append(box_flip)
+
+            img[i, :, :shape[0], :shape[1]] = \
+                img[i, :, :shape[0], :shape[1]].flip(dims=(-1,))
+
+        return rand_box_flip, img
+
+    def augment_bbox(self, bboxes_list, num_img, device, img_metas):
 
         for i in range(num_img):
             bboxes = bboxes_list[i]
-            shape = im_metas[i]['img_shape']
+            shape = img_metas[i]['img_shape']
             num_box = bboxes.size(0)
 
             base_width = \
@@ -202,20 +285,3 @@ class RandBox(nn.Module):
             bboxes[:, 1::2] = bboxes[:, 1::2].clamp(0, shape[0])
 
         return bboxes_list
-
-
-if __name__ == "__main__":
-    rand_box = RandBox()
-    gt_boxes = torch.tensor([[536.1965, 543.7751, 735.5865, 800.0000],
-                             [1.7610, 31.8126, 580.5970, 785.0679],
-                             [141.9691, 229.6019, 1105.5155, 800.0000],
-                             [1013.2112, 380.5714, 1198.5879, 800.0000],
-                             [0.0000, 416.4871, 91.6672, 546.0422],
-                             [154.5586, 422.4637, 515.8885, 792.8057],
-                             [1024.6953, 381.8642, 1188.6960, 577.3302]])
-    gt_boxes = [gt_boxes, gt_boxes, gt_boxes]
-    im_metas = {'img_shape': (800, 1199, 3)}
-    im_metas = [im_metas, im_metas, im_metas]
-    rand_boxes = rand_box(gt_boxes, im_metas)
-    for i in range(len(rand_boxes)):
-        print(rand_boxes[i].shape)
