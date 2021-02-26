@@ -160,7 +160,7 @@ class RandBox(nn.Module):
                 torch.rand(num_img, self.num_of_init_boxes, 1).to(device)
 
         num_of_boxes_per_img = torch.randint(self.min_num_of_final_box,
-                                             self.max_num_of_final_box,
+                                             self.max_num_of_final_box + 1,
                                              size=(num_img,)).to(device)
 
         rand_boxes = []

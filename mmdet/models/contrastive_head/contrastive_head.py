@@ -2,6 +2,7 @@
 this code is refered to https://github.com/PatrickHua/SimSiam
 """
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn.bricks.norm import build_norm_layer
@@ -198,5 +199,8 @@ class ContrastiveHead(nn.Module):
         return:
             negative cosine similarity between p and z
         """
+        with torch.no_grad():
+            z_no_grad = z.clone().detach()
+
         return -1.0 * self.each_view_loss_weight \
-            * F.cosine_similarity(p, z.detach(), dim=-1).mean()
+            * F.cosine_similarity(p, z_no_grad, dim=-1)
