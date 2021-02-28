@@ -33,9 +33,6 @@ class TwoStageDetectorForContrastive(BaseDetector):
 
         rand_box.update(dict(same_scale=same_scale))
         self.gen_rand_box = build_rand_box(rand_box)
-        self.contrastive_cfg = train_cfg.pop("contrastive", None)
-        assert self.contrastive_cfg is not None, \
-            "you need to add contrastive_cfg to train_cfg"
 
         self.contrastive_head = build_contrastive_head(contrastive_head)
 
@@ -48,7 +45,7 @@ class TwoStageDetectorForContrastive(BaseDetector):
             rpn_head_.update(train_cfg=rpn_train_cfg, test_cfg=test_cfg.rpn)
             self.rpn_head = build_head(rpn_head_)
 
-        if self.contrastive_cfg['train_rpn'] and roi_head is not None:
+        if roi_head is not None:
             # update train and test cfg here for now
             # TODO: refactor assigner & sampler
             rcnn_train_cfg = train_cfg.rcnn if train_cfg is not None else None
