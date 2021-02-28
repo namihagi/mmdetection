@@ -10,11 +10,11 @@ class FasterRCNNForContrastive(TwoStageDetectorForContrastive):
                  backbone,
                  rand_box,
                  contrastive_head,
-                 rpn_head,
                  roi_head,
                  train_cfg,
                  test_cfg,
                  neck=None,
+                 rpn_head=None,
                  pretrained=None,
                  same_scale=True):
         super(FasterRCNNForContrastive, self).__init__(
