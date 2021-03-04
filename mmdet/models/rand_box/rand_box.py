@@ -22,7 +22,8 @@ class RandBox(nn.Module):
                  max_num_of_final_box=50,
                  box_augment=False,
                  box_augment_scale=0.3,
-                 same_scale=True):
+                 same_scale=True,
+                 whole_img_roi=False):
         super(RandBox, self).__init__()
 
         self.flip = flip
@@ -38,6 +39,7 @@ class RandBox(nn.Module):
             "self.box_augment_scale need to in range [0, 0.5]."
 
         self.same_scale = same_scale
+        self.whole_img_roi = whole_img_roi
 
     def forward(self, rand_box_input):
 
@@ -82,7 +84,12 @@ class RandBox(nn.Module):
             img_1 = img[:, :3, :, :]
             img_2 = img[:, 3:, :, :]
 
-            rand_box_1 = self.generate_rand_box(img_metas, device, num_img)
+            if self.whole_img_roi:
+                rand_box_1 = self.convert_img_shape_to_roi(img_metas,
+                                                           device,
+                                                           num_img)
+            else:
+                rand_box_1 = self.generate_rand_box(img_metas, device, num_img)
 
             if self.flip:
                 rand_box_2, img_2 = self.flip_img_and_boxes(img_2, rand_box_1,
@@ -108,8 +115,16 @@ class RandBox(nn.Module):
         with torch.no_grad():
             assert img_metas_1[0]['ori_shape'] == img_metas_2[0]['ori_shape']
 
-            rand_box_ori = self.generate_rand_box(img_metas_1, device,
-                                                  num_img, shape_key='ori_shape')
+            if self.whole_img_roi:
+                rand_box_ori = self.convert_img_shape_to_roi(img_metas_1,
+                                                             device,
+                                                             num_img,
+                                                             shape_key='ori_shape')
+            else:
+                rand_box_ori = self.generate_rand_box(img_metas_1,
+                                                      device,
+                                                      num_img,
+                                                      shape_key='ori_shape')
 
             rand_box_1 = self.resize_box_in_img_shape(rand_box_ori,
                                                       img_metas_1,
@@ -285,3 +300,16 @@ class RandBox(nn.Module):
             bboxes[:, 1::2] = bboxes[:, 1::2].clamp(0, shape[0])
 
         return bboxes_list
+
+    def convert_img_shape_to_roi(self, img_metas, device,
+                                 num_img, shape_key='img_shape'):
+        rand_boxes = []
+
+        for i in range(num_img):
+            img_shape = img_metas[i][shape_key]
+            box = torch.tensor([0, 0, img_shape[1], img_shape[0]],
+                               dtype=torch.float32).to(device)
+            box = box.view(-1, 4)
+            rand_boxes.append(box)
+
+        return rand_boxes
