@@ -1,5 +1,5 @@
 _base_ = [
-    './models/faster_rcnn_r50_syncbn_pytorch_c4.py',
+    './_base_/faster_rcnn_r50_syncbn_pytorch_c4.py',
     '../../../configs/_base_/datasets/voc0712.py',
     '../../../configs/_base_/default_runtime.py'
 ]
