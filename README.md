@@ -18,7 +18,7 @@
   |-- tools
   |-- workspace
   |  |-- configs    各実験の設定ファイル群
-  |  |-- scripts    実験実行用script
+  |  |-- script     実験実行用script
   |  |-- work_dirs  実験生成物(pthなど，実行時自動生成)
 ~~~
 
