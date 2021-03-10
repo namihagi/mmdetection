@@ -1,5 +1,5 @@
 _base_ = [
-    './_base_/faster_rcnn_r50_syncbn_caffe_c4.py',
+    './_base_/faster_rcnn_r50_syncbn_c4.py',
     './_base_/coco_detection.py',
     './_base_/schedule_20e.py',
     './_base_/default_runtime.py'
