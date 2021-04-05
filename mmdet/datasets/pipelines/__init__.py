@@ -18,6 +18,7 @@ from .transforms_contrastive import (NormalizeForContrastive,
                                      PhotoMetricDistortionForContrastive,
                                      RandomFlipForContrastive,
                                      ResizeForContrastive, SimsiamAugmentation)
+from .transforms_simsiam import SimsiamAugWithCrop
 
 __all__ = [
     'Compose', 'to_tensor', 'ToTensor', 'ImageToTensor', 'ToDataContainer',
@@ -32,5 +33,6 @@ __all__ = [
     'DefaultFormatBundleForContrastive',
     'PhotoMetricDistortionForContrastive', 'ResizeForContrastive',
     'NormalizeForContrastive', 'PadForContrastive', 'SimsiamAugmentation',
-    'RandomFlipForContrastive', 'CollectForContrastive'
+    'RandomFlipForContrastive', 'CollectForContrastive',
+    'SimsiamAugWithCrop'
 ]

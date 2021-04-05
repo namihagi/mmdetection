@@ -29,6 +29,7 @@ from .yolact import YOLACT
 from .yolo import YOLOV3
 from .two_stage_contrastive import TwoStageDetectorForContrastive
 from .faster_rcnn_contrastive import FasterRCNNForContrastive
+from .self_supervised import SimSiam
 
 __all__ = [
     'ATSS', 'BaseDetector', 'SingleStageDetector', 'TwoStageDetector', 'RPN',
@@ -37,5 +38,6 @@ __all__ = [
     'FOVEA', 'FSAF', 'NASFCOS', 'PointRend', 'GFL', 'CornerNet', 'PAA',
     'YOLOV3', 'YOLACT', 'VFNet', 'DETR', 'TridentFasterRCNN', 'SparseRCNN',
     'SCNet',
-    'TwoStageDetectorForContrastive', 'FasterRCNNForContrastive'
+    'TwoStageDetectorForContrastive', 'FasterRCNNForContrastive',
+    'SimSiam'
 ]
