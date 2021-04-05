@@ -27,4 +27,4 @@ data = dict(
     workers_per_gpu=2,
     train=dict(pipeline=train_pipeline))
 # optimizer
-optimizer = dict(type='SGD', lr=0.05, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.00625, momentum=0.9, weight_decay=0.0001)
